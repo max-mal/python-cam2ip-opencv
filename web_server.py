@@ -26,6 +26,11 @@ def collect_data():
             break
 
         video_data = camera.get_jpeg()
+        if not video_data:
+            print("Failed to get img from camera. Exiting...")
+            should_exit = True
+            break
+
         time.sleep(config.camera_capture_delay)
 
 
@@ -140,6 +145,30 @@ class WebServer(BaseHTTPRequestHandler):
         self.wfile.write(bytes("<p>Request: %s</p>" % self.path, "utf-8"))
 
     @staticmethod
+    def list_cameras() -> dict:
+        import os
+        p = os.popen("v4l2-ctl --list-devices")
+        output = p.read()
+
+        cameras = {}
+
+        current_camera = None
+        for line in output.split("\n"):
+            if not line:
+                continue
+
+            if line[0] == "\t" and current_camera and "/dev/video" in line:
+                cameras[current_camera].append(line.strip().split("/dev/video")[1])
+                continue
+
+            if line[0] != "\t":
+                current_camera = line.split(":")[0]
+                cameras[current_camera] = []
+                continue
+
+        return cameras
+
+    @staticmethod
     def start(_config: Config):
         global config
         global camera
@@ -149,6 +178,17 @@ class WebServer(BaseHTTPRequestHandler):
         camera.camera_height = config.camera_height
         camera.camera_width = config.camera_width
         camera.camera_index = config.camera_index
+
+        cameras = WebServer.list_cameras()
+        print("Available cameras: ", cameras)
+
+        if config.camera_index == "auto":
+            name = list(cameras.keys())[0]
+            camera.camera_index = int(cameras[name][0])
+
+        if isinstance(config.camera_index, str):
+            cam = cameras[config.camera_index]
+            camera.camera_index = int(cam[0])
 
         t1 = threading.Thread(target=collect_data, name='t1')
         t1.start()
