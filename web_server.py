@@ -5,6 +5,7 @@ import time
 import base64
 from camera import Camera
 from config import Config
+import os
 
 config: Config
 hostName = "0.0.0.0"
@@ -15,23 +16,42 @@ video_data = None
 
 should_exit = False
 
+last_request_ts = 0
+last_request_threshold = 10
+
+capture_thread = None
+
 
 def collect_data():
     global video_data
     global camera
     global should_exit
+    global last_request_ts
 
+    last_request_ts = time.time()
     while True:
         if should_exit:
             break
 
-        video_data = camera.get_jpeg()
-        if not video_data:
-            print("Failed to get img from camera. Exiting...")
-            should_exit = True
+        if time.time() - last_request_ts > config.camera_inactivity_sec:
+            print("break")
             break
 
+        _video_data = None
+        try:
+            _video_data = camera.get_jpeg()
+        except Exception as e:
+            print(e)
+
+        if _video_data is None:
+            print("Failed to get img from camera. Exiting...")
+            os._exit(1)
+
+        video_data = _video_data
+
         time.sleep(config.camera_capture_delay)
+
+    camera.release()
 
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
@@ -87,6 +107,16 @@ class WebServer(BaseHTTPRequestHandler):
 
     def route_jpeg(self):
         global video_data
+        global capture_thread
+        global last_request_ts
+
+        last_request_ts = time.time()
+
+        if capture_thread is None or not capture_thread.is_alive():
+            WebServer.start_capture()
+
+            while not video_data:
+                time.sleep(0.1)
 
         if not video_data:
             self.send_response(500)
@@ -101,8 +131,9 @@ class WebServer(BaseHTTPRequestHandler):
     def route_mjpeg(self):
         global config
         global video_data
+        global last_request_ts
 
-        self.send_response(20)
+        self.send_response(200)
         self.send_header(
             'Content-type',
             'multipart/x-mixed-replace; boundary=--jpgboundary'
@@ -111,6 +142,7 @@ class WebServer(BaseHTTPRequestHandler):
 
         while True:
             try:
+                last_request_ts = time.time()
                 if not video_data:
                     continue
 
@@ -169,10 +201,18 @@ class WebServer(BaseHTTPRequestHandler):
         return cameras
 
     @staticmethod
+    def start_capture():
+        global capture_thread
+
+        capture_thread = threading.Thread(target=collect_data, name='capture_thread')
+        capture_thread.start()
+
+    @staticmethod
     def start(_config: Config):
         global config
         global camera
         global should_exit
+
         config = _config
 
         camera.camera_height = config.camera_height
@@ -190,8 +230,7 @@ class WebServer(BaseHTTPRequestHandler):
             cam = cameras[config.camera_index]
             camera.camera_index = int(cam[0])
 
-        t1 = threading.Thread(target=collect_data, name='t1')
-        t1.start()
+        WebServer.start_capture()
 
         server = ThreadedHTTPServer((config.server_addr, config.server_port), WebServer)
         try:
@@ -199,6 +238,5 @@ class WebServer(BaseHTTPRequestHandler):
             server.serve_forever()
         except KeyboardInterrupt:
             should_exit = True
-            t1.join()
             server.socket.close()
             camera.capture.release()

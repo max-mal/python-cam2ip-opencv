@@ -10,3 +10,5 @@ class Config:
     camera_width = 640
     camera_height = 480
     camera_capture_delay = 0.01
+
+    camera_inactivity_sec = 10  # after period camera will be released

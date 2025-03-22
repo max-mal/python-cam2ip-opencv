@@ -1,3 +1,4 @@
+from typing import Optional
 import cv2
 import io
 import numpy as np
@@ -18,10 +19,21 @@ class Camera:
             self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.camera_width)
             self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self.camera_height)
 
-        rc, img = self.capture.read()
-        return img
+        return self.capture.read()
 
-    def get_jpeg(self) -> io.BytesIO:
-        _is_success, buffer = cv2.imencode(".jpg", self.get_image())
+    def get_jpeg(self) -> Optional[io.BytesIO]:
+        ok, image = self.get_image()
+        if not ok:
+            return None
+
+        ok, buffer = cv2.imencode(".jpg", image)
+        if not ok:
+            return None
+
         io_buf = io.BytesIO(buffer)
         return io_buf
+
+    def release(self):
+        if self.capture is not None:
+            self.capture.release()
+            self.capture = None
