@@ -34,7 +34,7 @@ def collect_data():
             break
 
         if time.time() - last_request_ts > config.camera_inactivity_sec:
-            print("break")
+            print("Capture stopped due to inactivity")
             break
 
         _video_data = None
@@ -132,6 +132,13 @@ class WebServer(BaseHTTPRequestHandler):
         global config
         global video_data
         global last_request_ts
+        global capture_thread
+
+        if capture_thread is None or not capture_thread.is_alive():
+            WebServer.start_capture()
+
+            while not video_data:
+                time.sleep(0.1)
 
         self.send_response(200)
         self.send_header(
